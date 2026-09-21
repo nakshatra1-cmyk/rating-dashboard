@@ -1,7 +1,7 @@
 // Paste your Google Sheet CSV export URL here.
 // Example:
 // https://docs.google.com/spreadsheets/d/1K9LYi0S6wBGqj6JgWdEtBzYTR507Z2GRHXpDVyA9q2Q/export?format=csv&gid=0
-const GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1K9LYi0S6wBGqj6JgWdEtBzYTR507Z2GRHXpDVyA9q2Q/edit?gid=1993678244#gid=1993678244";
+const GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1K9LYi0S6wBGqj6JgWdEtBzYTR507Z2GRHXpDVyA9q2Q/export?format=csv&gid=1993678244";
 
 const state = {
   rows: [],
