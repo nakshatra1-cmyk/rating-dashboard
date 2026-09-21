@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Rating Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Test Rating Dashboard</h1>
+      <p>Weekly Test Rating Performance</p>
+    </div>
+    <button id="refreshBtn" class="refresh-btn">↻ Refresh</button>
+  </header>
+
+  <main class="container">
+    <section class="filters">
+      <div class="filter-group">
+        <label for="weekFilter">Reference Week</label>
+        <select id="weekFilter"></select>
+      </div>
+
+      <div class="filter-group">
+        <label for="boardFilter">Board</label>
+        <select id="boardFilter">
+          <option value="ALL">All Boards</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="subjectFilter">Subject</label>
+        <select id="subjectFilter">
+          <option value="ALL">All Subjects</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="titleSearch">Search Title</label>
+        <input id="titleSearch" type="text" placeholder="Search test title...">
+      </div>
+
+      <div class="filter-group">
+        <label for="viewFilter">View</label>
+        <select id="viewFilter">
+          <option value="expanded">All Expanded</option>
+          <option value="collapsed">All Collapsed</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="kpis">
+      <div class="kpi-card">
+        <span>Overall Rating</span>
+        <strong id="overallRating">—</strong>
+      </div>
+      <div class="kpi-card">
+        <span>Current Week</span>
+        <strong id="currentWeekRating">—</strong>
+      </div>
+      <div class="kpi-card">
+        <span>WoW Change</span>
+        <strong id="wowChange">—</strong>
+      </div>
+      <div class="kpi-card">
+        <span>Total Ratings</span>
+        <strong id="totalRatings">—</strong>
+      </div>
+    </section>
+
+    <section class="table-card">
+      <div id="loading" class="loading">Loading data...</div>
+      <div id="error" class="error hidden"></div>
+      <div id="tableContainer"></div>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
