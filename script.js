@@ -1,1086 +1,281 @@
-"use strict";
+/*
+  GOOGLE SHEET CONNECTION
+  -----------------------------------------------------------
+  1) In Google Sheets: File -> Share -> Publish to web
+  2) Select the sheet/tab containing your data and choose CSV.
+  3) Paste the published CSV URL below.
+  Example:
+  https://docs.google.com/spreadsheets/d/e/....../pub?gid=123456&single=true&output=csv
 
-/* =========================================================
-   GLOBAL STATE
-========================================================= */
+  If your sheet is already publicly readable, you can also use:
+  https://docs.google.com/spreadsheets/d/SHEET_ID/gviz/tq?tqx=out:csv&gid=GID
+*/
+const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1K9LYi0S6wBGqj6JgWdEtBzYTR507Z2GRHXpDVyA9q2Q/export?format=csv&gid=1993678244&utm_source=chatgpt.com";
 
-let dashboardData = null;
+const BENCHMARK = 4.3;
+const LAST_N_WEEKS = 5;
+let RAW = [];
+let FILTERED = [];
+let expandedBoards = new Set();
+let allWeekNumbers = [];
 
-let boardOpenState = {};
-let subjectOpenState = {};
+const $ = id => document.getElementById(id);
 
-
-/* =========================================================
-   DOM
-========================================================= */
-
-const weekFilter = document.getElementById("weekFilter");
-const boardFilter = document.getElementById("boardFilter");
-const subjectFilter = document.getElementById("subjectFilter");
-const titleSearch = document.getElementById("titleSearch");
-const viewFilter = document.getElementById("viewFilter");
-
-const refreshBtn = document.getElementById("refreshBtn");
-const retryBtn = document.getElementById("retryBtn");
-
-const tableBody = document.getElementById("tableBody");
-
-const loadingState = document.getElementById("loadingState");
-const errorState = document.getElementById("errorState");
-const emptyState = document.getElementById("emptyState");
-const tableWrapper = document.getElementById("tableWrapper");
-
-const errorMessage = document.getElementById("errorMessage");
-
-const overallRating = document.getElementById("overallRating");
-const currentRating = document.getElementById("currentRating");
-const wowChange = document.getElementById("wowChange");
-const totalRatings = document.getElementById("totalRatings");
-
-const lastUpdated = document.getElementById("lastUpdated");
-
-
-/* =========================================================
-   INIT
-========================================================= */
-
-document.addEventListener("DOMContentLoaded", () => {
-
-  refreshBtn.addEventListener("click", loadDashboard);
-
-  retryBtn.addEventListener("click", loadDashboard);
-
-  weekFilter.addEventListener("change", renderDashboard);
-
-  boardFilter.addEventListener("change", () => {
-
-    populateSubjectFilter();
-
-    renderDashboard();
-
-  });
-
-  subjectFilter.addEventListener("change", renderDashboard);
-
-  titleSearch.addEventListener("input", debounce(renderDashboard, 200));
-
-  viewFilter.addEventListener("change", () => {
-
-    const mode = viewFilter.value;
-
-    if (mode === "expanded") {
-
-      setAllOpen(true);
-
-    } else {
-
-      setAllOpen(false);
-
-    }
-
-    renderDashboard();
-
-  });
-
-  loadDashboard();
-
-});
-
-
-/* =========================================================
-   LOAD DATA
-========================================================= */
-
-async function loadDashboard() {
-
-  showLoading();
-
-  try {
-
-    const response = await fetch("/api/ratings", {
-
-      method: "GET",
-
-      headers: {
-        "Accept": "application/json"
-      },
-
-      cache: "no-store"
-
-    });
-
-
-    if (!response.ok) {
-
-      throw new Error(
-        `API error: ${response.status} ${response.statusText}`
-      );
-
-    }
-
-
-    const result = await response.json();
-
-
-    if (!result.success) {
-
-      throw new Error(
-        result.error || "Unable to load dashboard data."
-      );
-
-    }
-
-
-    dashboardData = result;
-
-
-    initializeFilters();
-
-    renderDashboard();
-
-    lastUpdated.textContent =
-      `Updated: ${formatDateTime(new Date())}`;
-
+function clean(v){ return String(v ?? "").trim(); }
+function num(v){
+  const n = parseFloat(String(v ?? "").replace(/,/g,""));
+  return Number.isFinite(n) ? n : 0;
+}
+function normalizeKey(s){
+  return clean(s).toLowerCase().replace(/[\s_]+/g,"").replace(/[()]/g,"");
+}
+function parseCSV(text){
+  const rows=[]; let row=[], cell="", quoted=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i], n=text[i+1];
+    if(c === '"'){
+      if(quoted && n === '"'){ cell+='"'; i++; }
+      else quoted=!quoted;
+    } else if(c === "," && !quoted){ row.push(cell); cell=""; }
+    else if((c === "\n" || c === "\r") && !quoted){
+      if(c === "\r" && n === "\n") i++;
+      row.push(cell); cell="";
+      if(row.some(x=>clean(x)!=="")) rows.push(row);
+      row=[];
+    } else cell+=c;
   }
-
-  catch (error) {
-
-    console.error(error);
-
-    showError(error.message);
-
-  }
-
+  if(cell!=="" || row.length){row.push(cell); if(row.some(x=>clean(x)!=="")) rows.push(row);}
+  return rows;
+}
+function toObjects(csv){
+  const rows=parseCSV(csv);
+  if(!rows.length) return [];
+  const headers=rows[0].map(h=>clean(h).replace(/^"|"$/g,""));
+  return rows.slice(1).map(r=>{
+    const o={}; headers.forEach((h,i)=>o[h]=clean(r[i]));
+    return o;
+  });
+}
+function getField(row, name){
+  if(row[name] !== undefined) return row[name];
+  const target=normalizeKey(name);
+  const k=Object.keys(row).find(x=>normalizeKey(x)===target);
+  return k ? row[k] : "";
+}
+function parseDate(s){
+  if(!s) return null;
+  const d=new Date(s);
+  if(!isNaN(d)) return d;
+  const m=String(s).match(/(\d{1,2})\s+([A-Za-z]+),?\s+(\d{4})/);
+  if(m) return new Date(`${m[2]} ${m[1]}, ${m[3]}`);
+  return null;
+}
+function weekNo(row){
+  const explicit=num(getField(row,"Week Name"));
+  if(explicit) return explicit;
+  const d=parseDate(getField(row,"rating_date_updated"));
+  if(!d) return 0;
+  const jan1=new Date(d.getFullYear(),0,1);
+  return Math.ceil((((d-jan1)/86400000)+jan1.getDay()+1)/7);
+}
+function monthSortKey(label){
+  const m=clean(label).match(/^([A-Za-z]+)\s*-\s*(\d{2,4})$/);
+  if(!m) return [9999,999];
+  const names={january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12};
+  return [2000+Number(m[2]), names[m[1].toLowerCase()]||99];
+}
+function unique(arr){return [...new Set(arr.filter(Boolean))];}
+function formatNum(n){return Number(n||0).toLocaleString("en-IN");}
+function formatRating(n){return n===null || n===undefined || !Number.isFinite(n) ? "" : n.toFixed(2);}
+function ratingClass(n){
+  if(!Number.isFinite(n)) return "";
+  if(n < BENCHMARK) return "rating-bad";
+  if(n > BENCHMARK) return "rating-good";
+  return "rating-neutral";
+}
+function esc(s){
+  return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
 }
 
-
-/* =========================================================
-   FILTER INITIALIZATION
-========================================================= */
-
-function initializeFilters() {
-
-  if (!dashboardData) return;
-
-
-  /* -----------------------------
-     Weeks
-  ----------------------------- */
-
-  weekFilter.innerHTML = "";
-
-  dashboardData.weeks.forEach((week, index) => {
-
-    const option = document.createElement("option");
-
-    option.value = week;
-
-    option.textContent = formatWeek(week);
-
-    if (index === 0) {
-
-      option.selected = true;
-
-    }
-
-    weekFilter.appendChild(option);
-
-  });
-
-
-  /* -----------------------------
-     Boards
-  ----------------------------- */
-
-  boardFilter.innerHTML =
-    `<option value="">All Boards</option>`;
-
-  dashboardData.boards.forEach(board => {
-
-    const option = document.createElement("option");
-
-    option.value = board;
-
-    option.textContent = board;
-
-    boardFilter.appendChild(option);
-
-  });
-
-
-  populateSubjectFilter();
-
-
-  boardOpenState = {};
-  subjectOpenState = {};
-
-  setAllOpen(true);
-
-}
-
-
-/* =========================================================
-   SUBJECT FILTER
-========================================================= */
-
-function populateSubjectFilter() {
-
-  if (!dashboardData) return;
-
-
-  const selectedBoard = boardFilter.value;
-
-  const subjects = new Set();
-
-
-  dashboardData.rows.forEach(row => {
-
-    if (
-      selectedBoard &&
-      row.board !== selectedBoard
-    ) {
-
-      return;
-
-    }
-
-    if (row.subject) {
-
-      subjects.add(row.subject);
-
-    }
-
-  });
-
-
-  const currentValue = subjectFilter.value;
-
-
-  subjectFilter.innerHTML =
-    `<option value="">All Subjects</option>`;
-
-
-  [...subjects]
-    .sort((a, b) =>
-      a.localeCompare(b, undefined, {
-        sensitivity: "base"
-      })
-    )
-    .forEach(subject => {
-
-      const option = document.createElement("option");
-
-      option.value = subject;
-
-      option.textContent = subject;
-
-      subjectFilter.appendChild(option);
-
-    });
-
-
-  if ([...subjects].includes(currentValue)) {
-
-    subjectFilter.value = currentValue;
-
+async function loadData(){
+  setStatus("Loading…");
+  if(!SHEET_CSV_URL || SHEET_CSV_URL.includes("PASTE_YOUR")){
+    setStatus("Add Sheet URL");
+    showToast("Open script.js and paste your Google Sheet CSV URL.");
+    return;
   }
-
+  try{
+    const res=await fetch(SHEET_CSV_URL,{cache:"no-store"});
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const csv=await res.text();
+    RAW=toObjects(csv);
+    if(!RAW.length) throw new Error("No rows found");
+    setupFilters();
+    applyFilters();
+    setStatus("Live");
+  }catch(e){
+    console.error(e);
+    setStatus("Error");
+    showToast("Could not load Google Sheet. Check the CSV URL and publishing permissions.");
+  }
 }
-
-
-/* =========================================================
-   RENDER DASHBOARD
-========================================================= */
-
-function renderDashboard() {
-
-  if (!dashboardData) return;
-
-
-  const selectedWeek = weekFilter.value;
-
-  const selectedBoard = boardFilter.value;
-
-  const selectedSubject = subjectFilter.value;
-
-  const search = titleSearch.value
-    .trim()
-    .toLowerCase();
-
-
-  let rows = dashboardData.rows.filter(row => {
-
-    if (
-      selectedBoard &&
-      row.board !== selectedBoard
-    ) {
-
-      return false;
-
-    }
-
-
-    if (
-      selectedSubject &&
-      row.subject !== selectedSubject
-    ) {
-
-      return false;
-
-    }
-
-
-    if (
-      search &&
-      !row.title.toLowerCase().includes(search)
-    ) {
-
-      return false;
-
-    }
-
-
+function setStatus(t){$("statusPill").textContent=t;}
+function setupFilters(){
+  const boards=unique(RAW.map(r=>getField(r,"Board Name"))).sort();
+  const subjects=unique(RAW.map(r=>getField(r,"Subject Name"))).sort();
+  fillSelect("boardFilter",boards,"All Boards");
+  fillSelect("subjectFilter",subjects,"All Subjects");
+}
+function fillSelect(id,vals,first){
+  const el=$(id), old=el.value;
+  el.innerHTML=`<option value="">${first}</option>`+vals.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join("");
+  if(vals.includes(old)) el.value=old;
+}
+function applyFilters(){
+  const board=$("boardFilter").value, subject=$("subjectFilter").value;
+  const from=$("fromDate").value ? new Date($("fromDate").value+"T00:00:00") : null;
+  const to=$("toDate").value ? new Date($("toDate").value+"T23:59:59") : null;
+  FILTERED=RAW.filter(r=>{
+    if(board && getField(r,"Board Name")!==board) return false;
+    if(subject && getField(r,"Subject Name")!==subject) return false;
+    const d=parseDate(getField(r,"rating_date_updated"));
+    if(from && (!d || d<from)) return false;
+    if(to && (!d || d>to)) return false;
     return true;
-
   });
-
-
-  updateKPIs(rows, selectedWeek);
-
-  renderTable(rows, selectedWeek);
-
+  renderAll();
+}
+function renderAll(){
+  $("recordCount").textContent=`${formatNum(FILTERED.length)} records`;
+  const weeks=unique(FILTERED.map(weekNo).filter(Boolean)).sort((a,b)=>a-b);
+  allWeekNumbers=weeks;
+  const latest=weeks.length?weeks[weeks.length-1]:0;
+  const selectedWeeks=weeks.slice(-LAST_N_WEEKS);
+  $("weekWindow").textContent=selectedWeeks.length?`Weeks ${selectedWeeks.join(", ")} · last ${selectedWeeks.length}`:"Last 5 weeks";
+  const months=unique(FILTERED.map(r=>getField(r,"Month Name")));
+  $("monthWindow").textContent=`${months.length} month${months.length===1?"":"s"} available`;
+  const ratings=FILTERED.map(r=>num(getField(r,"rating"))).filter((x,i)=>getField(FILTERED[i],"rating")!=="");
+  const avg=ratings.length?ratings.reduce((a,b)=>a+b,0)/ratings.length:null;
+  $("overallRating").textContent=avg===null?"—":formatRating(avg);
+  $("totalRating").textContent=formatNum(ratings.reduce((a,b)=>a+b,0));
+  $("uniqueStudents").textContent=formatNum(unique(FILTERED.map(r=>getField(r,"studentid"))).length);
+  $("latestWeek").textContent=latest?`Week ${latest}`:"—";
+  renderWeekly(selectedWeeks);
+  renderMonthly();
 }
 
-
-/* =========================================================
-   KPI
-========================================================= */
-
-function updateKPIs(rows, selectedWeek) {
-
-  if (!rows.length) {
-
-    overallRating.textContent = "-";
-    currentRating.textContent = "-";
-    wowChange.textContent = "-";
-    totalRatings.textContent = "0";
-
-    return;
-
-  }
-
-
-  const overallValues = rows
-    .map(r => r.overall)
-    .filter(isNumber);
-
-
-  const currentValues = rows
-    .map(r => r.weeks?.[selectedWeek])
-    .filter(isNumber);
-
-
-  const previousWeek = getPreviousWeek(selectedWeek);
-
-
-  const previousValues = rows
-    .map(r => r.weeks?.[previousWeek])
-    .filter(isNumber);
-
-
-  const overall =
-    average(overallValues);
-
-
-  const current =
-    average(currentValues);
-
-
-  const previous =
-    average(previousValues);
-
-
-  const change =
-    isNumber(current) && isNumber(previous)
-      ? current - previous
-      : null;
-
-
-  overallRating.textContent =
-    formatRating(overall);
-
-
-  currentRating.textContent =
-    formatRating(current);
-
-
-  if (change === null) {
-
-    wowChange.textContent = "-";
-
-  } else {
-
-    wowChange.textContent =
-      `${change >= 0 ? "+" : ""}${change.toFixed(2)}`;
-
-    wowChange.className =
-      `kpi-value ${
-        change >= 0
-          ? "change-positive"
-          : "change-negative"
-      }`;
-
-  }
-
-
-  const total =
-    rows.reduce(
-      (sum, row) =>
-        sum + (row.totalRatings || 0),
-      0
-    );
-
-
-  totalRatings.textContent =
-    total.toLocaleString("en-IN");
-
+function aggregate(rows){
+  const ratings=rows.map(r=>num(getField(r,"rating"))).filter((x,i)=>getField(rows[i],"rating")!=="");
+  return {avg:ratings.length?ratings.reduce((a,b)=>a+b,0)/ratings.length:null,sum:ratings.reduce((a,b)=>a+b,0),count:ratings.length};
 }
-
-
-/* =========================================================
-   TABLE
-========================================================= */
-
-function renderTable(rows, selectedWeek) {
-
-  tableBody.innerHTML = "";
-
-
-  if (!rows.length) {
-
-    tableWrapper.classList.add("hidden");
-
-    emptyState.classList.remove("hidden");
-
-    return;
-
+function groupBy(arr,keyFn){
+  const m=new Map();
+  arr.forEach(x=>{const k=keyFn(x); if(!m.has(k))m.set(k,[]);m.get(k).push(x);});
+  return m;
+}
+function boardSubjectRows(rows){
+  return [...groupBy(rows,r=>getField(r,"Board Name"))].sort((a,b)=>a[0].localeCompare(b[0]));
+}
+function ratingCells(rows, periods){
+  return periods.flatMap(p=>{
+    const a=aggregate(rows.filter(r=>p.match(r)));
+    return [
+      `<td class="${ratingClass(a.avg)}">${formatRating(a.avg)}</td>`,
+      `<td>${formatNum(a.sum)}</td>`
+    ];
+  }).join("");
+}
+function renderWeekly(weeks){
+  const table=$("weeklyTable");
+  if(!weeks.length){
+    table.innerHTML="<tbody><tr><td>No data available for selected filters.</td></tr></tbody>"; return;
   }
-
-
-  emptyState.classList.add("hidden");
-
-  tableWrapper.classList.remove("hidden");
-
-
-  const hierarchy = {};
-
-
-  rows.forEach(row => {
-
-    if (!hierarchy[row.board]) {
-
-      hierarchy[row.board] = {};
-
-    }
-
-
-    if (!hierarchy[row.board][row.subject]) {
-
-      hierarchy[row.board][row.subject] = [];
-
-    }
-
-
-    hierarchy[row.board][row.subject].push(row);
-
-  });
-
-
-  Object.keys(hierarchy)
-    .sort()
-    .forEach(board => {
-
-      const boardKey = createKey("board", board);
-
-
-      /* BOARD ROW */
-
-      const boardRow =
-        document.createElement("tr");
-
-      boardRow.className = "board-row";
-
-
-      const boardCell =
-        document.createElement("td");
-
-      boardCell.className = "name-cell";
-
-      boardCell.colSpan = 1;
-
-
-      const boardOpen =
-        boardOpenState[boardKey] !== false;
-
-
-      boardCell.innerHTML = `
-        <span
-          class="expand-icon ${boardOpen ? "open" : ""}"
-          data-board="${escapeAttr(boardKey)}"
-        >
-          ▶
-        </span>
-
-        ${escapeHTML(board)}
-      `;
-
-
-      boardRow.appendChild(boardCell);
-
-
-      addEmptyCells(boardRow, 5);
-
-
-      boardCell.addEventListener("click", () => {
-
-        boardOpenState[boardKey] =
-          !(boardOpenState[boardKey] !== false);
-
-        renderDashboard();
-
+  const periods=weeks.map(w=>({label:String(w),match:r=>weekNo(r)===w}));
+  let html=`<thead><tr><th rowspan="2" style="min-width:145px">Board Name</th><th rowspan="2" style="min-width:155px">Subject Name</th><th colspan="${periods.length*2}">Week Name · Values</th><th colspan="2">Grand Total</th></tr><tr>`;
+  periods.forEach(p=>html+=`<th>${p.label}<br><small>AVERAGE</small></th><th>${p.label}<br><small>SUM</small></th>`);
+  html+=`<th>AVERAGE</th><th>SUM</th></tr></thead><tbody>`;
+  boardSubjectRows(FILTERED.filter(r=>weeks.includes(weekNo(r)))).forEach(([board, bRows])=>{
+    const expanded=expandedBoards.has(board);
+    const bAgg=aggregate(bRows);
+    html+=`<tr class="board-row"><td><span class="toggle" data-board="${esc(board)}">${expanded?"▾":"▸"}</span>${esc(board)}</td><td></td>${ratingCells(bRows,periods)}<td class="${ratingClass(bAgg.avg)}">${formatRating(bAgg.avg)}</td><td>${formatNum(bAgg.sum)}</td></tr>`;
+    if(expanded){
+      const subjects=groupBy(bRows,r=>getField(r,"Subject Name"));
+      [...subjects].sort((a,b)=>a[0].localeCompare(b[0])).forEach(([subject,sRows])=>{
+        const a=aggregate(sRows);
+        html+=`<tr class="subject-row"><td></td><td>${esc(subject)}</td>${ratingCells(sRows,periods)}<td class="${ratingClass(a.avg)}">${formatRating(a.avg)}</td><td>${formatNum(a.sum)}</td></tr>`;
       });
-
-
-      tableBody.appendChild(boardRow);
-
-
-      if (!boardOpen) return;
-
-
-      Object.keys(hierarchy[board])
-        .sort()
-        .forEach(subject => {
-
-          const subjectKey =
-            createKey(
-              "subject",
-              `${board}__${subject}`
-            );
-
-
-          const subjectRow =
-            document.createElement("tr");
-
-          subjectRow.className =
-            "subject-row";
-
-
-          const subjectCell =
-            document.createElement("td");
-
-          subjectCell.className =
-            "name-cell";
-
-
-          const subjectOpen =
-            subjectOpenState[subjectKey] !== false;
-
-
-          subjectCell.innerHTML = `
-            <span
-              class="expand-icon ${subjectOpen ? "open" : ""}"
-              data-subject="${escapeAttr(subjectKey)}"
-            >
-              ▶
-            </span>
-
-            ${escapeHTML(subject)}
-          `;
-
-
-          subjectRow.appendChild(subjectCell);
-
-          addEmptyCells(subjectRow, 5);
-
-
-          subjectCell.addEventListener("click", () => {
-
-            subjectOpenState[subjectKey] =
-              !(subjectOpenState[subjectKey] !== false);
-
-            renderDashboard();
-
-          });
-
-
-          tableBody.appendChild(subjectRow);
-
-
-          if (!subjectOpen) return;
-
-
-          hierarchy[board][subject]
-            .sort((a, b) =>
-              a.title.localeCompare(
-                b.title,
-                undefined,
-                {
-                  sensitivity: "base"
-                }
-              )
-            )
-            .forEach(row => {
-
-              tableBody.appendChild(
-                createTitleRow(
-                  row,
-                  selectedWeek
-                )
-              );
-
-            });
-
-        });
-
-    });
-
-}
-
-
-/* =========================================================
-   TITLE ROW
-========================================================= */
-
-function createTitleRow(row, selectedWeek) {
-
-  const tr =
-    document.createElement("tr");
-
-  tr.className = "title-row";
-
-
-  const titleCell =
-    document.createElement("td");
-
-  titleCell.className =
-    "name-cell title-name";
-
-  titleCell.textContent =
-    row.title;
-
-
-  tr.appendChild(titleCell);
-
-
-  /* Overall */
-
-  tr.appendChild(
-    createRatingCell(row.overall)
-  );
-
-
-  /* Current */
-
-  const current =
-    row.weeks?.[selectedWeek];
-
-  tr.appendChild(
-    createRatingCell(current)
-  );
-
-
-  /* Last */
-
-  const lastWeek =
-    getPreviousWeek(selectedWeek);
-
-  tr.appendChild(
-    createRatingCell(
-      row.weeks?.[lastWeek]
-    )
-  );
-
-
-  /* Last 2 */
-
-  const last2 =
-    getPreviousWeek(
-      lastWeek
-    );
-
-  tr.appendChild(
-    createRatingCell(
-      row.weeks?.[last2]
-    )
-  );
-
-
-  /* Last 3 */
-
-  const last3 =
-    getPreviousWeek(
-      last2
-    );
-
-  tr.appendChild(
-    createRatingCell(
-      row.weeks?.[last3]
-    )
-  );
-
-
-  return tr;
-
-}
-
-
-/* =========================================================
-   RATING CELL
-========================================================= */
-
-function createRatingCell(value) {
-
-  const td =
-    document.createElement("td");
-
-
-  if (!isNumber(value)) {
-
-    td.innerHTML =
-      `<span class="rating-empty">—</span>`;
-
-    return td;
-
-  }
-
-
-  const span =
-    document.createElement("span");
-
-  span.className =
-    `rating-chip ${ratingClass(value)}`;
-
-  span.textContent =
-    value.toFixed(1);
-
-
-  td.appendChild(span);
-
-
-  return td;
-
-}
-
-
-/* =========================================================
-   HELPERS
-========================================================= */
-
-function ratingClass(value) {
-
-  if (value >= 4.5) {
-
-    return "rating-green";
-
-  }
-
-  if (value >= 3.5) {
-
-    return "rating-amber";
-
-  }
-
-  return "rating-red";
-
-}
-
-
-function formatRating(value) {
-
-  if (!isNumber(value)) {
-
-    return "-";
-
-  }
-
-  return value.toFixed(2);
-
-}
-
-
-function average(values) {
-
-  if (!values.length) {
-
-    return null;
-
-  }
-
-  return values.reduce(
-    (sum, value) =>
-      sum + value,
-    0
-  ) / values.length;
-
-}
-
-
-function isNumber(value) {
-
-  return (
-    typeof value === "number" &&
-    Number.isFinite(value)
-  );
-
-}
-
-
-/* =========================================================
-   WEEK HELPERS
-========================================================= */
-
-function getPreviousWeek(week) {
-
-  if (!week) return null;
-
-
-  const date =
-    parseLocalDate(week);
-
-
-  date.setDate(
-    date.getDate() - 7
-  );
-
-
-  return formatDate(date);
-
-}
-
-
-function parseLocalDate(value) {
-
-  const parts =
-    value.split("-").map(Number);
-
-  return new Date(
-    parts[0],
-    parts[1] - 1,
-    parts[2]
-  );
-
-}
-
-
-function formatDate(date) {
-
-  const y =
-    date.getFullYear();
-
-
-  const m =
-    String(
-      date.getMonth() + 1
-    ).padStart(2, "0");
-
-
-  const d =
-    String(
-      date.getDate()
-    ).padStart(2, "0");
-
-
-  return `${y}-${m}-${d}`;
-
-}
-
-
-function formatWeek(value) {
-
-  const date =
-    parseLocalDate(value);
-
-
-  const end =
-    new Date(date);
-
-  end.setDate(
-    end.getDate() + 6
-  );
-
-
-  return `${formatDisplayDate(date)} – ${formatDisplayDate(end)}`;
-
-}
-
-
-function formatDisplayDate(date) {
-
-  return date.toLocaleDateString(
-    "en-IN",
-    {
-      day: "2-digit",
-      month: "short",
-      year: "numeric"
     }
-  );
-
-}
-
-
-/* =========================================================
-   OPEN / CLOSE
-========================================================= */
-
-function setAllOpen(open) {
-
-  if (!dashboardData) return;
-
-
-  dashboardData.boards.forEach(board => {
-
-    boardOpenState[
-      createKey("board", board)
-    ] = open;
-
-
-    dashboardData.subjects
-      .filter(item =>
-        item.board === board
-      )
-      .forEach(item => {
-
-        subjectOpenState[
-          createKey(
-            "subject",
-            `${item.board}__${item.subject}`
-          )
-        ] = open;
-
-      });
-
+    // board total is the board row itself; no duplicate total needed
   });
-
+  const grand=aggregate(FILTERED.filter(r=>weeks.includes(weekNo(r))));
+  html+=`<tr class="grand-row"><td>Grand Total</td><td></td>${ratingCells(FILTERED.filter(r=>weeks.includes(weekNo(r))),periods)}<td class="${ratingClass(grand.avg)}">${formatRating(grand.avg)}</td><td>${formatNum(grand.sum)}</td></tr>`;
+  html+="</tbody>";
+  table.innerHTML=html;
+  table.querySelectorAll(".toggle").forEach(el=>el.addEventListener("click",()=>{
+    const b=el.dataset.board;
+    expandedBoards.has(b)?expandedBoards.delete(b):expandedBoards.add(b);
+    renderWeekly(weeks);
+  }));
 }
-
-
-function createKey(type, value) {
-
-  return `${type}:${value}`;
-
-}
-
-
-/* =========================================================
-   UI STATES
-========================================================= */
-
-function showLoading() {
-
-  loadingState.classList.remove("hidden");
-
-  errorState.classList.add("hidden");
-
-  emptyState.classList.add("hidden");
-
-  tableWrapper.classList.add("hidden");
-
-}
-
-
-function showError(message) {
-
-  loadingState.classList.add("hidden");
-
-  tableWrapper.classList.add("hidden");
-
-  emptyState.classList.add("hidden");
-
-  errorState.classList.remove("hidden");
-
-  errorMessage.textContent =
-    message || "Unknown error";
-
-}
-
-
-/* =========================================================
-   HTML SAFETY
-========================================================= */
-
-function escapeHTML(value) {
-
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-
-}
-
-
-function escapeAttr(value) {
-
-  return escapeHTML(value);
-
-}
-
-
-/* =========================================================
-   TABLE CELLS
-========================================================= */
-
-function addEmptyCells(row, count) {
-
-  for (let i = 0; i < count; i++) {
-
-    const td =
-      document.createElement("td");
-
-    row.appendChild(td);
-
-  }
-
-}
-
-
-/* =========================================================
-   DEBOUNCE
-========================================================= */
-
-function debounce(fn, delay) {
-
-  let timer;
-
-  return function (...args) {
-
-    clearTimeout(timer);
-
-    timer = setTimeout(
-      () => fn.apply(this, args),
-      delay
-    );
-
-  };
-
-}
-
-
-/* =========================================================
-   DATE/TIME
-========================================================= */
-
-function formatDateTime(date) {
-
-  return date.toLocaleString(
-    "en-IN",
-    {
-      day: "2-digit",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit"
+function renderMonthly(){
+  const table=$("monthlyTable");
+  const months=unique(FILTERED.map(r=>getField(r,"Month Name"))).sort((a,b)=>{
+    const aa=monthSortKey(a),bb=monthSortKey(b); return aa[0]-bb[0]||aa[1]-bb[1];
+  });
+  if(!months.length){table.innerHTML="<tbody><tr><td>No data available for selected filters.</td></tr></tbody>";return;}
+  const periods=months.map(m=>({label:m,match:r=>getField(r,"Month Name")===m}));
+  let html=`<thead><tr><th rowspan="2" style="min-width:145px">Board Name</th><th rowspan="2" style="min-width:155px">Subject Name</th>`;
+  periods.forEach(p=>html+=`<th colspan="2">${esc(p.label)}</th>`);
+  html+=`<th colspan="2">Grand Total</th></tr><tr>`;
+  periods.forEach(p=>html+=`<th>AVERAGE</th><th>SUM</th>`);
+  html+=`<th>AVERAGE</th><th>SUM</th></tr></thead><tbody>`;
+  boardSubjectRows(FILTERED).forEach(([board,bRows])=>{
+    const expanded=expandedBoards.has("M:"+board), bAgg=aggregate(bRows);
+    html+=`<tr class="board-row"><td><span class="toggle" data-board="${esc(board)}">${expanded?"▾":"▸"}</span>${esc(board)}</td><td></td>${ratingCells(bRows,periods)}<td class="${ratingClass(bAgg.avg)}">${formatRating(bAgg.avg)}</td><td>${formatNum(bAgg.sum)}</td></tr>`;
+    if(expanded){
+      const subjects=groupBy(bRows,r=>getField(r,"Subject Name"));
+      [...subjects].sort((a,b)=>a[0].localeCompare(b[0])).forEach(([subject,sRows])=>{
+        const a=aggregate(sRows);
+        html+=`<tr class="subject-row"><td></td><td>${esc(subject)}</td>${ratingCells(sRows,periods)}<td class="${ratingClass(a.avg)}">${formatRating(a.avg)}</td><td>${formatNum(a.sum)}</td></tr>`;
+      });
     }
-  );
-
+  });
+  const grand=aggregate(FILTERED);
+  html+=`<tr class="grand-row"><td>Grand Total</td><td></td>${ratingCells(FILTERED,periods)}<td class="${ratingClass(grand.avg)}">${formatRating(grand.avg)}</td><td>${formatNum(grand.sum)}</td></tr></tbody>`;
+  table.innerHTML=html;
+  table.querySelectorAll(".toggle").forEach(el=>el.addEventListener("click",()=>{
+    const b="M:"+el.dataset.board;
+    expandedBoards.has(b)?expandedBoards.delete(b):expandedBoards.add(b);
+    renderMonthly();
+  }));
 }
+async function exportPNG(tableId){
+  const table=$(tableId);
+  const wrap=table.parentElement;
+  showToast("Preparing PNG…");
+  const old={overflow:wrap.style.overflow,width:wrap.style.width};
+  wrap.style.overflow="visible"; wrap.style.width=table.scrollWidth+"px";
+  try{
+    const canvas=await html2canvas(wrap,{backgroundColor:"#ffffff",scale:2,useCORS:true});
+    const a=document.createElement("a");
+    a.download=`${tableId}-${new Date().toISOString().slice(0,10)}.png`;
+    a.href=canvas.toDataURL("image/png"); a.click();
+    showToast("PNG exported.");
+  }catch(e){console.error(e);showToast("PNG export failed.");}
+  wrap.style.overflow=old.overflow; wrap.style.width=old.width;
+}
+function showToast(msg){
+  const t=$("toast"); t.textContent=msg;t.classList.add("show");
+  clearTimeout(window.__toast);window.__toast=setTimeout(()=>t.classList.remove("show"),2500);
+}
+$("boardFilter").addEventListener("change",applyFilters);
+$("subjectFilter").addEventListener("change",applyFilters);
+$("fromDate").addEventListener("change",applyFilters);
+$("toDate").addEventListener("change",applyFilters);
+$("resetBtn").addEventListener("click",()=>{
+  $("boardFilter").value="";$("subjectFilter").value="";$("fromDate").value="";$("toDate").value="";
+  expandedBoards.clear();applyFilters();
+});
+$("refreshBtn").addEventListener("click",loadData);
+document.querySelectorAll("[data-export]").forEach(b=>b.addEventListener("click",()=>exportPNG(b.dataset.export)));
+loadData();
