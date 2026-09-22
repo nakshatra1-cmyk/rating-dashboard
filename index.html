@@ -1,82 +1,105 @@
-
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Test Rating Dashboard</title>
-  <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Commerce Rating Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div>
-      <h1>Test Rating Dashboard</h1>
-      <p>Weekly Test Rating Performance</p>
-    </div>
-    <button id="refreshBtn" class="refresh-btn">↻ Refresh</button>
-  </header>
-
-  <main class="container">
-    <section class="filters">
-      <div class="filter-group">
-        <label for="weekFilter">Reference Week</label>
-        <select id="weekFilter"></select>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">ACADEMIC QUALITY ANALYTICS</div>
+        <h1>Rating Performance Dashboard</h1>
+        <p class="subtitle">Weekly & monthly student-rating performance across boards and subjects</p>
       </div>
-
-      <div class="filter-group">
-        <label for="boardFilter">Board</label>
-        <select id="boardFilter">
-          <option value="ALL">All Boards</option>
-        </select>
+      <div class="top-actions">
+        <button id="refreshBtn" class="btn secondary">↻ Refresh</button>
+        <span id="statusPill" class="status-pill">Loading…</span>
       </div>
+    </header>
 
-      <div class="filter-group">
-        <label for="subjectFilter">Subject</label>
-        <select id="subjectFilter">
-          <option value="ALL">All Subjects</option>
-        </select>
+    <section class="filters-card">
+      <div class="filter-heading">
+        <div>
+          <h2>Filters</h2>
+          <span>Use filters to drill down without changing the source data.</span>
+        </div>
+        <button id="resetBtn" class="text-btn">Reset filters</button>
       </div>
-
-      <div class="filter-group">
-        <label for="titleSearch">Search Title</label>
-        <input id="titleSearch" type="text" placeholder="Search test title...">
+      <div class="filters-grid">
+        <label>Board Name
+          <select id="boardFilter"><option value="">All Boards</option></select>
+        </label>
+        <label>Subject Name
+          <select id="subjectFilter"><option value="">All Subjects</option></select>
+        </label>
+        <label>Rating Date From
+          <input id="fromDate" type="date" />
+        </label>
+        <label>Rating Date To
+          <input id="toDate" type="date" />
+        </label>
       </div>
-
-      <div class="filter-group">
-        <label for="viewFilter">View</label>
-        <select id="viewFilter">
-          <option value="expanded">All Expanded</option>
-          <option value="collapsed">All Collapsed</option>
-        </select>
+      <div class="filter-meta">
+        <span id="recordCount">0 records</span>
+        <span>•</span>
+        <span id="weekWindow">Last 5 weeks</span>
+        <span>•</span>
+        <span id="monthWindow">All available months</span>
       </div>
     </section>
 
     <section class="kpis">
-      <div class="kpi-card"><span>Overall Rating</span>
-        <strong id="overallRating">—</strong>
-      </div>
-      <div class="kpi-card">
-        <span>Current Week</span>
-        <strong id="currentWeekRating">—</strong>
-      </div>
-      <div class="kpi-card">
-        <span>WoW Change</span>
-        <strong id="wowChange">—</strong>
-      </div>
-      <div class="kpi-card">
-        <span>Total Ratings</span>
-        <strong id="totalRatings">—</strong>
-      </div>
+      <div class="kpi"><span>Overall Rating</span><strong id="overallRating">—</strong><small>Filtered data</small></div>
+      <div class="kpi"><span>Total Rating Sum</span><strong id="totalRating">—</strong><small>Filtered data</small></div>
+      <div class="kpi"><span>Unique Students</span><strong id="uniqueStudents">—</strong><small>Filtered data</small></div>
+      <div class="kpi"><span>Latest Week</span><strong id="latestWeek">—</strong><small>Current source week</small></div>
     </section>
 
-    <section class="legend"><b>Condition Formatting:</b> <span>🟢 Rating ≥ 4.3</span> <span>🔴 Rating &lt; 4.3</span> <span>Count shown beside every rating</span></section>
+    <main>
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="section-tag">01 · WEEKLY PERFORMANCE</div>
+            <h2>Last 5 Weeks — Board & Subject</h2>
+            <p>Click a board row to expand/collapse its subjects. Rating cells are color-coded around the 4.3 benchmark.</p>
+          </div>
+          <button class="btn export" data-export="weeklyTable">⇩ Export PNG</button>
+        </div>
+        <div class="legend">
+          <span><i class="dot good"></i> Rating &gt; 4.3</span>
+          <span><i class="dot bad"></i> Rating &lt; 4.3</span>
+          <span><i class="dot neutral"></i> Rating = 4.3</span>
+        </div>
+        <div class="table-wrap" id="weeklyTableWrap">
+          <table id="weeklyTable" class="data-table"></table>
+        </div>
+      </section>
 
-    <section class="table-card">
-      <div id="loading" class="loading">Loading data...</div>
-      <div id="error" class="error hidden"></div>
-      <div id="tableContainer"></div>
-    </section>
-  </main>
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="section-tag">02 · MONTHLY PERFORMANCE</div>
+            <h2>All Available Months — Board & Subject</h2>
+            <p>Unlike the weekly table, this view keeps every month available in the filtered dataset.</p>
+          </div>
+          <button class="btn export" data-export="monthlyTable">⇩ Export PNG</button>
+        </div>
+        <div class="table-wrap" id="monthlyTableWrap">
+          <table id="monthlyTable" class="data-table"></table>
+        </div>
+      </section>
+    </main>
 
+    <footer>
+      <span>Rating benchmark: <b>4.3</b></span>
+      <span>Source: Google Sheets</span>
+    </footer>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
