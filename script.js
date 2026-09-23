@@ -157,7 +157,7 @@ function renderAll(){
   const ratings=FILTERED.map(r=>num(getField(r,"rating"))).filter((x,i)=>getField(FILTERED[i],"rating")!=="");
   const avg=ratings.length?ratings.reduce((a,b)=>a+b,0)/ratings.length:null;
   $("overallRating").textContent=avg===null?"—":formatRating(avg);
-  $("totalRating").textContent=formatNum(ratings.reduce((a,b)=>a+b,0));
+  $("totalRating").textContent=formatNum(ratings.length);
   $("uniqueStudents").textContent=formatNum(unique(FILTERED.map(r=>getField(r,"studentid"))).length);
   $("latestWeek").textContent=latest?`Week ${latest}`:"—";
   renderWeekly(selectedWeeks);
@@ -181,7 +181,7 @@ function ratingCells(rows, periods){
     const a=aggregate(rows.filter(r=>p.match(r)));
     return [
       `<td class="${ratingClass(a.avg)}">${formatRating(a.avg)}</td>`,
-      `<td>${formatNum(a.sum)}</td>`
+      `<td>${formatNum(a.count)}</td>`
     ];
   }).join("");
 }
@@ -192,8 +192,8 @@ function renderWeekly(weeks){
   }
   const periods=weeks.map(w=>({label:String(w),match:r=>weekNo(r)===w}));
   let html=`<thead><tr><th rowspan="2" style="min-width:145px">Board Name</th><th rowspan="2" style="min-width:155px">Subject Name</th><th colspan="${periods.length*2}">Week Name · Values</th><th colspan="2">Grand Total</th></tr><tr>`;
-  periods.forEach(p=>html+=`<th>${p.label}<br><small>AVERAGE</small></th><th>${p.label}<br><small>SUM</small></th>`);
-  html+=`<th>AVERAGE</th><th>SUM</th></tr></thead><tbody>`;
+  periods.forEach(p=>html+=`<th>${p.label}<br><small>AVERAGE</small></th><th>${p.label}<br><small>COUNT</small></th>`);
+  html+=`<th>AVERAGE</th><th>COUNT</th></tr></thead><tbody>`;
   // IMPORTANT:
   // - The weekly visualization columns contain ONLY the latest 5 weeks.
   // - The "Grand Total" columns are calculated from ALL filtered records,
@@ -206,7 +206,7 @@ function renderWeekly(weeks){
     const expanded=expandedBoards.has(board);
     const bAgg=aggregate(bRowsAll);
 
-    html+=`<tr class="board-row"><td><span class="toggle" data-board="${esc(board)}">${expanded?"▾":"▸"}</span>${esc(board)}</td><td></td>${ratingCells(bRows5,periods)}<td class="${ratingClass(bAgg.avg)}">${formatRating(bAgg.avg)}</td><td>${formatNum(bAgg.sum)}</td></tr>`;
+    html+=`<tr class="board-row"><td><span class="toggle" data-board="${esc(board)}">${expanded?"▾":"▸"}</span>${esc(board)}</td><td></td>${ratingCells(bRows5,periods)}<td class="${ratingClass(bAgg.avg)}">${formatRating(bAgg.avg)}</td><td>${formatNum(bAgg.count)}</td></tr>`;
 
     if(expanded){
       const subjects=groupBy(bRows5,r=>getField(r,"Subject Name"));
@@ -214,14 +214,14 @@ function renderWeekly(weeks){
         const sRowsAll=bRowsAll.filter(r=>getField(r,"Subject Name")===subject);
         const sRows5=sRowsAll.filter(r=>weeks.includes(weekNo(r)));
         const a=aggregate(sRowsAll);
-        html+=`<tr class="subject-row"><td></td><td>${esc(subject)}</td>${ratingCells(sRows5,periods)}<td class="${ratingClass(a.avg)}">${formatRating(a.avg)}</td><td>${formatNum(a.sum)}</td></tr>`;
+        html+=`<tr class="subject-row"><td></td><td>${esc(subject)}</td>${ratingCells(sRows5,periods)}<td class="${ratingClass(a.avg)}">${formatRating(a.avg)}</td><td>${formatNum(a.count)}</td></tr>`;
       });
     }
   });
 
   // Weekly cells = latest 5 weeks; Grand Total = ALL filtered weeks.
   const grand=aggregate(FILTERED);
-  html+=`<tr class="grand-row"><td>Grand Total</td><td></td>${ratingCells(last5Rows,periods)}<td class="${ratingClass(grand.avg)}">${formatRating(grand.avg)}</td><td>${formatNum(grand.sum)}</td></tr>`;
+  html+=`<tr class="grand-row"><td>Grand Total</td><td></td>${ratingCells(last5Rows,periods)}<td class="${ratingClass(grand.avg)}">${formatRating(grand.avg)}</td><td>${formatNum(grand.count)}</td></tr>`;
   html+="</tbody>";
   table.innerHTML=html;
   table.querySelectorAll(".toggle").forEach(el=>el.addEventListener("click",()=>{
@@ -240,21 +240,21 @@ function renderMonthly(){
   let html=`<thead><tr><th rowspan="2" style="min-width:145px">Board Name</th><th rowspan="2" style="min-width:155px">Subject Name</th>`;
   periods.forEach(p=>html+=`<th colspan="2">${esc(p.label)}</th>`);
   html+=`<th colspan="2">Grand Total</th></tr><tr>`;
-  periods.forEach(p=>html+=`<th>AVERAGE</th><th>SUM</th>`);
-  html+=`<th>AVERAGE</th><th>SUM</th></tr></thead><tbody>`;
+  periods.forEach(p=>html+=`<th>AVERAGE</th><th>COUNT</th>`);
+  html+=`<th>AVERAGE</th><th>COUNT</th></tr></thead><tbody>`;
   boardSubjectRows(FILTERED).forEach(([board,bRows])=>{
     const expanded=expandedBoards.has("M:"+board), bAgg=aggregate(bRows);
-    html+=`<tr class="board-row"><td><span class="toggle" data-board="${esc(board)}">${expanded?"▾":"▸"}</span>${esc(board)}</td><td></td>${ratingCells(bRows,periods)}<td class="${ratingClass(bAgg.avg)}">${formatRating(bAgg.avg)}</td><td>${formatNum(bAgg.sum)}</td></tr>`;
+    html+=`<tr class="board-row"><td><span class="toggle" data-board="${esc(board)}">${expanded?"▾":"▸"}</span>${esc(board)}</td><td></td>${ratingCells(bRows,periods)}<td class="${ratingClass(bAgg.avg)}">${formatRating(bAgg.avg)}</td><td>${formatNum(bAgg.count)}</td></tr>`;
     if(expanded){
       const subjects=groupBy(bRows,r=>getField(r,"Subject Name"));
       [...subjects].sort((a,b)=>a[0].localeCompare(b[0])).forEach(([subject,sRows])=>{
         const a=aggregate(sRows);
-        html+=`<tr class="subject-row"><td></td><td>${esc(subject)}</td>${ratingCells(sRows,periods)}<td class="${ratingClass(a.avg)}">${formatRating(a.avg)}</td><td>${formatNum(a.sum)}</td></tr>`;
+        html+=`<tr class="subject-row"><td></td><td>${esc(subject)}</td>${ratingCells(sRows,periods)}<td class="${ratingClass(a.avg)}">${formatRating(a.avg)}</td><td>${formatNum(a.count)}</td></tr>`;
       });
     }
   });
   const grand=aggregate(FILTERED);
-  html+=`<tr class="grand-row"><td>Grand Total</td><td></td>${ratingCells(FILTERED,periods)}<td class="${ratingClass(grand.avg)}">${formatRating(grand.avg)}</td><td>${formatNum(grand.sum)}</td></tr></tbody>`;
+  html+=`<tr class="grand-row"><td>Grand Total</td><td></td>${ratingCells(FILTERED,periods)}<td class="${ratingClass(grand.avg)}">${formatRating(grand.avg)}</td><td>${formatNum(grand.count)}</td></tr></tbody>`;
   table.innerHTML=html;
   table.querySelectorAll(".toggle").forEach(el=>el.addEventListener("click",()=>{
     const b="M:"+el.dataset.board;
@@ -292,4 +292,3 @@ $("resetBtn").addEventListener("click",()=>{
 $("refreshBtn").addEventListener("click",loadData);
 document.querySelectorAll("[data-export]").forEach(b=>b.addEventListener("click",()=>exportPNG(b.dataset.export)));
 loadData();
-
